@@ -177,7 +177,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Lida com os cliques nos botões do MENU PRINCIPAL ---
 async def main_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-     = update.callback_
     await .answer(
     )  # Responde à callback  para remover o estado de "carregando" do botão
 
@@ -187,6 +186,7 @@ async def main_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text="Entendido! Vamos lá. Preparando a lista de produtos para você:"
     )
     await show_product_list(update, context, message_id_to_edit=query.message.message_id)
+
 
     elif query.data == 'menu_duvidas':
         faq_message = (
