@@ -176,19 +176,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Lida com os cliques nos botões do MENU PRINCIPAL ---
 async def main_menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer(
-    )  # Responde à callback query para remover o estado de "carregando" do botão
+     = update.callback_
+    await .answer(
+    )  # Responde à callback  para remover o estado de "carregando" do botão
 
     # Ajuste aqui para a frase mais natural
     if query.data == 'menu_comprar':
-        # Esta é a frase editada para quando o usuário clica em "Quero Comprar"
-        await query.edit_message_text(
-            text="Entendido! Vamos lá. Preparando a lista de produtos para você:"
-        )
-        # Chama show_product_list para exibir os produtos.
-        # Não precisa passar message_id_to_edit aqui, pois show_product_list já envia uma nova mensagem se não for edição.
-        await show_product_list(update, context)
+    await query.edit_message_text(
+        text="Entendido! Vamos lá. Preparando a lista de produtos para você:"
+    )
+    await show_product_list(update, context, message_id_to_edit=query.message.message_id)
+
     elif query.data == 'menu_duvidas':
         faq_message = (
             "Entendo sua necessidade de tirar dúvidas! Estamos aqui para ajudar. Você pode:\n\n"  # Frase mais amigável
