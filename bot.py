@@ -28,7 +28,7 @@ if not TOKEN:
 if not MERCADO_PAGO_ACCESS_TOKEN:
     print("⚠️ ERRO: MERCADO_PAGO_ACCESS_TOKEN não configurado.")
 
-WEBHOOK_URL = "https://SEU_WEBHOOK_AQUI/notificacao"  # <-- SE QUISER RECEBER CONFIRMAÇÕES
+WEBHOOK_URL = "https://ntg-tech-vendas.onrender.com/notificacao"  # <-- SE QUISER RECEBER CONFIRMAÇÕES
 
 # ================== LISTA FIXA DE PRODUTOS ==================
 PRODUTOS = {
