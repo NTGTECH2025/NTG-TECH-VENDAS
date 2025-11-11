@@ -14,6 +14,7 @@ import time  # Importa a biblioteca 'time'
 app_flask = Flask(__name__)
 
 
+
 @app_flask.route('/health')
 def health_check():
     """
