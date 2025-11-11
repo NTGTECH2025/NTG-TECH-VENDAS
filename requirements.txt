@@ -4,4 +4,3 @@ Flask
 Pillow
 qrcode
 telegram
-python-telegram-bot==20.3
