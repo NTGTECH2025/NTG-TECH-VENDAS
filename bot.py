@@ -154,21 +154,38 @@ async def product_button_handler(update: Update, context: ContextTypes.DEFAULT_T
     except:
         await context.bot.send_message(chat_id=query.message.chat_id, text="Erro ao gerar link de pagamento.")
 
-# Bot Telegram
 def run_telegram_bot_thread_target():
+    """
+    Função alvo para a thread do bot do Telegram.
+    Cria e define um novo loop de evento asyncio para esta thread.
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
     if not TOKEN:
-        print("ERRO: TOKEN não configurado.")
+        print("ERRO CRÍTICO: TOKEN do Telegram não configurado. Bot não pode iniciar.")
         return
+
     app_tg = Application.builder().token(TOKEN).build()
+
+    # Handler para o comando /start
     app_tg.add_handler(CommandHandler("start", start))
+
+    # Handler para QUALQUER mensagem de texto que não seja um comando
     app_tg.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+
+    # Handler para os botões do menu principal E para o botão "Voltar ao Menu Principal" nos vídeos
     app_tg.add_handler(CallbackQueryHandler(main_menu_button, pattern='^menu_'))
+
+    # Handler para os botões de vídeo
     app_tg.add_handler(CallbackQueryHandler(send_video_message, pattern='^video_'))
+
+    # Handler para os botões de produtos
     app_tg.add_handler(CallbackQueryHandler(product_button_handler))
-    print("Bot do Telegram iniciado...")
+
+    print("Bot do Telegram iniciado... Aguardando comandos e cliques...")
     app_tg.run_polling()
+
 
 # Início
 if __name__ == "__main__":
