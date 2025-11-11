@@ -1,24 +1,19 @@
 import os
 import requests
-import asyncio
+import threading
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
-import threading
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # ------------------------------------------
-# CONFIGURAÇÕES
+# VARIÁVEIS DE AMBIENTE
 # ------------------------------------------
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
-RENDER_BASE_URL = os.environ.get("RENDER_BASE_URL")  # https://ntg-tech-vendas.onrender.com
-
-if not TOKEN or not MERCADO_PAGO_ACCESS_TOKEN or not RENDER_BASE_URL:
-    print("⚠️ ERRO: Variáveis de ambiente não configuradas corretamente!")
-    exit()
+RENDER_BASE_URL = os.environ.get("RENDER_BASE_URL")
 
 # ------------------------------------------
-# LISTA DE PRODUTOS (todos R$10,00)
+# PRODUTOS (R$10 CADA)
 # ------------------------------------------
 PRODUTOS = {
     "ILLUSTRATOR 2025": "https://drive.google.com/drive/folders/1x1JQV47hebrLQe_GF4eq32oQgMt2E5CA?usp=drive_link",     
@@ -38,28 +33,21 @@ PRODUTOS = {
 PRECO_PADRAO = 10.00
 
 # ------------------------------------------
-# TELEGRAM BOT
+# TELEGRAM
 # ------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton(prod, callback_data=prod)] for prod in PRODUTOS.keys()]
-    await update.message.reply_text("Escolha o produto:", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [[InlineKeyboardButton(p, callback_data=p)] for p in PRODUTOS.keys()]
+    await update.message.reply_text("Selecione o produto:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def comprar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    produto = query.data
-    await query.answer()
+    q = update.callback_query
+    produto = q.data
+    await q.answer()
 
     body = {
-        "items": [{
-            "title": produto,
-            "quantity": 1,
-            "unit_price": PRECO_PADRAO
-        }],
+        "items": [{"title": produto, "quantity": 1, "unit_price": PRECO_PADRAO}],
         "notification_url": f"{RENDER_BASE_URL}/notificacao",
-        "metadata": {
-            "telegram_user_id": query.from_user.id,
-            "produto": produto
-        }
+        "metadata": {"telegram_user_id": q.from_user.id, "produto": produto}
     }
 
     resp = requests.post(
@@ -68,36 +56,39 @@ async def comprar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         json=body
     ).json()
 
-    link_pagamento = resp.get("init_point")
+    await q.edit_message_text(f"✅ Clique para pagar:\n\n{resp.get('init_point')}")
 
-    await query.edit_message_text(f"💰 *Pagamento:* R$10,00\n\nClique para pagar:\n{link_pagamento}", parse_mode="Markdown")
 
 # ------------------------------------------
-# WEBHOOK (ENTREGA AUTOMÁTICA)
+# WEBHOOK DO MERCADO PAGO
 # ------------------------------------------
 app = Flask(__name__)
 
 @app.route("/notificacao", methods=["POST"])
 def notificacao():
     data = request.json
-    pagamento_id = data.get("data", {}).get("id")
+    payment_id = data.get("data", {}).get("id")
 
-    if pagamento_id:
+    if payment_id:
         resp = requests.get(
-            f"https://api.mercadopago.com/v1/payments/{pagamento_id}",
+            f"https://api.mercadopago.com/v1/payments/{payment_id}",
             headers={"Authorization": f"Bearer {MERCADO_PAGO_ACCESS_TOKEN}"}
         ).json()
 
         if resp.get("status") == "approved":
             produto = resp["metadata"]["produto"]
-            user = resp["metadata"]["telegram_user_id"]
+            user_id = resp["metadata"]["telegram_user_id"]
             link = PRODUTOS[produto]
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                          json={"chat_id": user, "text": f"✅ Pagamento aprovado!\n\nAqui está seu download:\n{produto}\n{link}"})
+
+            requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+                json={"chat_id": user_id, "text": f"✅ Pagamento aprovado!\n\n🔗 *Download:* {produto}\n{link}"}
+            )
     return "OK"
 
+
 # ------------------------------------------
-# EXECUTAR BOT + SERVIDOR
+# EXECUTAR SERVIDOR E BOT
 # ------------------------------------------
 def run_bot():
     app_tg = Application.builder().token(TOKEN).build()
@@ -105,6 +96,7 @@ def run_bot():
     app_tg.add_handler(CallbackQueryHandler(comprar))
     app_tg.run_polling()
 
+threading.Thread(target=run_bot).start()
+
 if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
     app.run(host="0.0.0.0", port=10000)
