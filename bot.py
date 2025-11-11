@@ -7,7 +7,7 @@ from io import BytesIO
 import threading
 from flask import Flask
 import asyncio
-
+  
 # ================== SERVIDOR FLASK (HEALTH CHECK) ==================
 app_flask = Flask(__name__)
 
