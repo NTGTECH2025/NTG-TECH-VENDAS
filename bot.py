@@ -4,7 +4,7 @@ import os
 import sqlite3  # Importe a biblioteca SQLite3
 
 app = Flask(__name__)
-
+ 
 # --- CONFIGURAÇÕES (Lendo dos Secrets do Replit) ---
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
