@@ -3,8 +3,7 @@ import requests
 import os
 
 # --- CONFIGURAÇÕES (Lendo dos Secrets do Render) ---
-# As variáveis MERCADO_PAGO_ACCESS_TOKEN e TELEGRAM_BOT_TOKEN
-# devem ser definidas no painel de ambiente do Render.
+# As variáveis devem ser definidas no painel de ambiente do Render.
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
@@ -35,7 +34,6 @@ PRODUCTS_DATA = {
 
 def get_product_data(product_name):
     """Busca os dados de um produto na lista fixa pelo nome."""
-    # Garante que a busca é feita usando o nome em MAIÚSCULAS
     return PRODUCTS_DATA.get(product_name.upper())
 
 def get_all_products_for_api():
@@ -69,12 +67,65 @@ def enviar_mensagem_telegram(chat_id, texto):
     except requests.exceptions.RequestException as e:
         print(f"ERRO CRÍTICO: Falha ao enviar mensagem para o Telegram para {chat_id}. Erro: {e}")
 
-# --- ROTAS DA APLICAÇÃO WEBHOOK ---
+
+# ===============================================
+#          ROTAS DO FLASK (WEBHOOKS)
+# ===============================================
 
 @app.route('/')
 def home():
-    return 'Webhook do bot de vendas ativo no Render! Aguardando notificações em /notificacao'
+    return 'Webhook do bot de vendas ativo no Render! Pronto para receber notificações.'
 
+# --- ROTA: RECEBE MENSAGENS DO TELEGRAM ---
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    try:
+        update = request.get_json()
+        
+        if update and 'message' in update:
+            chat_id = update['message']['chat']['id']
+            texto_recebido = update['message'].get('text', '').strip()
+            
+            # Converte para maiúsculas para verificar o produto, minúsculas para comandos
+            comando = texto_recebido.upper() 
+            
+            if comando == "/START":
+                mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use /produtos para ver nosso catálogo e siga as instruções para iniciar o pagamento."
+            
+            elif comando == "/PRODUTOS":
+                produtos = get_all_products_for_api()
+                
+                mensagem_resposta = "🛍️ <b>Nossos Produtos Disponíveis:</b>\n\n"
+                for p in produtos:
+                    mensagem_resposta += f"🔹 <b>{p['name']}</b> - R$ {p['price']:.2f}\n"
+
+                mensagem_resposta += "\n💡 **Para Comprar:** Digite o nome exato do produto que deseja (Exemplo: PHOTOSHOP 2025) para receber o link de pagamento."
+                
+            # Verifica se a mensagem corresponde a um produto
+            elif comando in PRODUCTS_DATA:
+                produto_data = PRODUCTS_DATA[comando]
+                link_pagamento = "LINK DE PAGAMENTO DO MERCADO PAGO AQUI" # SUBSTITUA ESTE LINK PELO SEU CHECKOUT REAL
+                
+                mensagem_resposta = (
+                    f"🛒 Você selecionou: <b>{comando}</b> (R$ {produto_data['price']:.2f})\n\n"
+                    f"Acesse o link abaixo para finalizar a compra via Mercado Pago:\n"
+                    f"<a href=\"{link_pagamento}\">{link_pagamento}</a>"
+                )
+                
+            else:
+                mensagem_resposta = f"Desculpe, não entendi o comando <b>{texto_recebido}</b>. Use /start ou /produtos."
+                
+            enviar_mensagem_telegram(chat_id, mensagem_resposta)
+
+        # O Telegram sempre espera 200 OK, mesmo se não houver ação.
+        return jsonify({'status': 'ok'}), 200
+    
+    except Exception as e:
+        print(f"ERRO CRÍTICO ao processar webhook do Telegram: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 200
+
+
+# --- ROTA: RECEBE NOTIFICAÇÕES DO MERCADO PAGO ---
 @app.route('/notificacao', methods=['POST'])
 def notificacao():
     try:
@@ -136,8 +187,7 @@ def notificacao():
 @app.route('/produtos', methods=['GET'])
 def get_products():
     """
-    Rota para o bot do Telegram buscar a lista de produtos da variável fixa.
-    Retorna todos os produtos como JSON.
+    Rota auxiliar para o bot buscar a lista de produtos (se necessário).
     """
     try:
         products_list = get_all_products_for_api()
