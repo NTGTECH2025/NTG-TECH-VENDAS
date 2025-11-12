@@ -1,13 +1,14 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-import sqlite3  # Importe a biblioteca SQLite3 (mantida, mas não usada para DB. Removível se quiser otimizar, mas a deixarei como estava)
-
-app = Flask(__name__)
 
 # --- CONFIGURAÇÕES (Lendo dos Secrets do Render) ---
+# As variáveis MERCADO_PAGO_ACCESS_TOKEN e TELEGRAM_BOT_TOKEN
+# devem ser definidas no painel de ambiente do Render.
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+
+app = Flask(__name__)
 
 if not MERCADO_PAGO_ACCESS_TOKEN:
     print("AVISO: MERCADO_PAGO_ACCESS_TOKEN não encontrado nas variáveis de ambiente! O webhook pode não funcionar corretamente.")
@@ -15,9 +16,8 @@ if not TELEGRAM_BOT_TOKEN:
     print("AVISO: TELEGRAM_BOT_TOKEN não encontrado nas variáveis de ambiente! O envio de mensagens para o Telegram pode falhar.")
 
 
-# --- LISTA DE PRODUTOS FIXA (Substituindo o Banco de Dados) ---
+# --- LISTA DE PRODUTOS FIXA ---
 # O NOME do produto (em MAIÚSCULAS) será a chave.
-# O valor deve ser um dicionário com 'price' e 'link'.
 PRODUCTS_DATA = {
     "ILLUSTRATOR 2025": {"price": 9.00, "link": "https://drive.google.com/drive/folders/1x1JQV47hebrLQe_GF4eq32oQgMt2E5CA?usp=drive_link"},
     "PHOTOSHOP 2024": {"price": 8.00, "link": "https://drive.google.com/file/d/1wt3EKXIHdopKeFBLG0pEuPWJ2Of4ZrAx/view?usp=sharing"},
@@ -31,12 +31,12 @@ PRODUCTS_DATA = {
     "LIGHTROOM CLASSIC 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/19imV-3YRbViFw-EMHh4ivS9ok2Sqv0un/view?usp=sharing"}
 }
 
-# --- FUNÇÕES DE BUSCA (Adaptadas para usar o dicionário) ---
+# --- FUNÇÕES DE BUSCA ---
 
 def get_product_data(product_name):
     """Busca os dados de um produto na lista fixa pelo nome."""
-    # O nome da metadata do Mercado Pago deve bater com a chave (ex: "ILLUSTRATOR 2025")
-    return PRODUCTS_DATA.get(product_name)
+    # Garante que a busca é feita usando o nome em MAIÚSCULAS
+    return PRODUCTS_DATA.get(product_name.upper())
 
 def get_all_products_for_api():
     """Formata todos os produtos da lista fixa para a resposta JSON."""
@@ -145,11 +145,3 @@ def get_products():
     except Exception as e:
         print(f"ERRO: Falha ao buscar produtos da lista fixa: {e}")
         return jsonify({"error": "Failed to fetch products"}), 500
-
-if __name__ == "__main__":
-    # No Render, é melhor usar um servidor WSGI como Gunicorn.
-    # Mas se for usar o modo de desenvolvimento, a linha abaixo funciona:
-    # O Render ignora esta seção e usa seu 'Start Command' (ex: gunicorn app:app)
-    port = int(os.environ.get("PORT", 8080))
-    # Para o Render, não use app.run() diretamente. Use Gunicorn.
-    print(f"Flask App (Webhook) pronto. Use Gunicorn para iniciar (ex: gunicorn app:app)")
