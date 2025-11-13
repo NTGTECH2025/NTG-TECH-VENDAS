@@ -9,8 +9,8 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 app = Flask(__name__)
 
-# URL base do seu serviço no Render (necessário para o Webhook do Mercado Pago)
-# Esta URL é fixa com base no seu domínio: https://ntg-tech-vendas.onrender.com
+# URL base do seu serviço no Render
+# ESTA URL DEVE SER A MESMA DO SEU SERVIÇO NO RENDER (EX: https://ntg-tech-vendas.onrender.com)
 RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com" 
 
 if not MERCADO_PAGO_ACCESS_TOKEN:
@@ -50,9 +50,10 @@ def get_all_products_for_api():
         })
     return products_list
 
-# FUNÇÃO MODIFICADA: Agora aceita o 'reply_markup' (dicionário Python)
+# FUNÇÃO CHAVE: Envia mensagem, e se o reply_markup for passado, o 'requests' serializa para o Telegram.
 def enviar_mensagem_telegram(chat_id, texto, reply_markup=None): 
     if not TELEGRAM_BOT_TOKEN:
+        print("Erro: TELEGRAM_BOT_TOKEN ausente.")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -61,12 +62,12 @@ def enviar_mensagem_telegram(chat_id, texto, reply_markup=None):
         "text": texto,
         "parse_mode": "HTML",
     }
-    # ADICIONA O reply_markup APENAS SE ELE EXISTIR
+    # ADICIONA O reply_markup, que DEVE ser um dicionário Python (o Requests cuida da serialização JSON)
     if reply_markup:
          payload["reply_markup"] = reply_markup
          
     try:
-        # A biblioteca requests converte o payload em JSON automaticamente
+        # Usa 'json=payload' para garantir que os dados sejam enviados como JSON
         requests.post(url, json=payload).raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"ERRO CRÍTICO: Falha ao enviar mensagem para o Telegram. Erro: {e}")
@@ -135,7 +136,7 @@ def telegram_webhook():
             
             comando = texto_recebido.upper() 
             
-            # Teclado para esconder os botões (um dicionário Python)
+            # Teclado para esconder os botões (dicionário Python)
             hide_keyboard = {"remove_keyboard": True}
 
             if comando == "/START":
@@ -144,33 +145,31 @@ def telegram_webhook():
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
                 return jsonify({'status': 'ok'}), 200
 
-            # === BLOCO CHAVE MODIFICADO: MOSTRA OS PRODUTOS COMO BOTÕES ===
+            # === BLOCO CHAVE: CRIA E MOSTRA OS BOTÕES (Reply Keyboard) ===
             elif comando == "/PRODUTOS":
                 # 1. Cria a estrutura dos botões de teclado (Reply Keyboard)
                 keyboard_buttons = []
                 # Adiciona cada produto como um botão em sua própria linha
                 for name in PRODUCTS_DATA.keys():
-                    # Adiciona o nome do produto como um array de strings
                     keyboard_buttons.append([name]) 
                 
                 # Adiciona comandos úteis na última linha
                 keyboard_buttons.append(["/start"])
 
-                # 2. Monta o objeto Reply Keyboard (DICIONÁRIO PYTHON)
-                # A chave 'keyboard' precisa ser um array de arrays de strings.
+                # 2. Monta o objeto Reply Keyboard (DICIONÁRIO PYTHON CORRETO)
                 reply_markup = {
                     "keyboard": keyboard_buttons,
                     "resize_keyboard": True,
-                    "one_time_keyboard": False
+                    "one_time_keyboard": False # Deixa o teclado visível até ser removido
                 }
 
                 mensagem_resposta = "🛍️ <b>Selecione o produto desejado abaixo:</b>"
 
-                # 3. Envia a mensagem COM o teclado de produtos e retorna
+                # 3. Envia a mensagem COM o teclado de produtos
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=reply_markup)
                 return jsonify({'status': 'ok'}), 200
                 
-            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP (Ativado pelo clique no botão) ===
+            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP (Acionado pelos botões) ===
             elif comando in PRODUCTS_DATA:
                 produto_data = PRODUCTS_DATA[comando]
                 
@@ -199,7 +198,6 @@ def telegram_webhook():
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
                 return jsonify({'status': 'ok'}), 200
 
-        # Retorno 200 OK é obrigatório para o Telegram (caso o update não tenha 'message')
         return jsonify({'status': 'ok'}), 200
     
     except Exception as e:
