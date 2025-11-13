@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-import json # Importar para criar o payload JSON do teclado
 
 # --- CONFIGURAÇÕES (Lendo dos Secrets do Render) ---
 # O Render carrega estas variáveis do seu painel de ambiente.
@@ -51,7 +50,7 @@ def get_all_products_for_api():
         })
     return products_list
 
-# FUNÇÃO MODIFICADA PARA ACEITAR O TECLADO (reply_markup)
+# FUNÇÃO MODIFICADA: Agora aceita o 'reply_markup' (dicionário Python)
 def enviar_mensagem_telegram(chat_id, texto, reply_markup=None): 
     if not TELEGRAM_BOT_TOKEN:
         return
@@ -61,11 +60,13 @@ def enviar_mensagem_telegram(chat_id, texto, reply_markup=None):
         "chat_id": chat_id,
         "text": texto,
         "parse_mode": "HTML",
-        # Inclui o objeto do teclado (se for None, o teclado atual é mantido)
-        # Se for um teclado novo (como o de produtos), ele substitui o anterior
-        "reply_markup": reply_markup 
     }
+    # ADICIONA O reply_markup APENAS SE ELE EXISTIR
+    if reply_markup:
+         payload["reply_markup"] = reply_markup
+         
     try:
+        # A biblioteca requests converte o payload em JSON automaticamente
         requests.post(url, json=payload).raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"ERRO CRÍTICO: Falha ao enviar mensagem para o Telegram. Erro: {e}")
@@ -134,33 +135,34 @@ def telegram_webhook():
             
             comando = texto_recebido.upper() 
             
-            # Teclado padrão para comandos iniciais (oculta o teclado de produtos)
-            hide_keyboard = json.dumps({"remove_keyboard": True})
+            # Teclado para esconder os botões (um dicionário Python)
+            hide_keyboard = {"remove_keyboard": True}
 
             if comando == "/START":
                 mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use /produtos para ver nosso catálogo e selecione um produto para iniciar o pagamento."
                 
-                # Envia mensagem sem teclado, ou com um teclado de comandos básicos se preferir
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
                 return jsonify({'status': 'ok'}), 200
 
-            # === BLOCO MODIFICADO: MOSTRA OS PRODUTOS COMO BOTÕES ===
+            # === BLOCO CHAVE MODIFICADO: MOSTRA OS PRODUTOS COMO BOTÕES ===
             elif comando == "/PRODUTOS":
                 # 1. Cria a estrutura dos botões de teclado (Reply Keyboard)
                 keyboard_buttons = []
-                # Adiciona cada produto como um botão (uma linha por produto)
+                # Adiciona cada produto como um botão em sua própria linha
                 for name in PRODUCTS_DATA.keys():
+                    # Adiciona o nome do produto como um array de strings
                     keyboard_buttons.append([name]) 
                 
                 # Adiciona comandos úteis na última linha
-                keyboard_buttons.append(["/start"]) # Oculta o /produtos para evitar duplicidade
+                keyboard_buttons.append(["/start"])
 
-                # 2. Monta o objeto Reply Keyboard
-                reply_markup = json.dumps({
+                # 2. Monta o objeto Reply Keyboard (DICIONÁRIO PYTHON)
+                # A chave 'keyboard' precisa ser um array de arrays de strings.
+                reply_markup = {
                     "keyboard": keyboard_buttons,
                     "resize_keyboard": True,
                     "one_time_keyboard": False
-                })
+                }
 
                 mensagem_resposta = "🛍️ <b>Selecione o produto desejado abaixo:</b>"
 
@@ -168,11 +170,10 @@ def telegram_webhook():
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=reply_markup)
                 return jsonify({'status': 'ok'}), 200
                 
-            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP (Também ativado pelo clique no botão) ===
+            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP (Ativado pelo clique no botão) ===
             elif comando in PRODUCTS_DATA:
                 produto_data = PRODUCTS_DATA[comando]
                 
-                # Tenta criar o link de pagamento dinamicamente
                 link_pagamento = criar_preferencia_mp(
                     produto_nome=comando,
                     preco=produto_data['price'],
@@ -188,14 +189,13 @@ def telegram_webhook():
                 else:
                     mensagem_resposta = "❌ Desculpe, houve um erro ao gerar o link de pagamento. Por favor, verifique o Token do Mercado Pago (ACCESS_TOKEN) ou contate o suporte."
                 
-                # Envia mensagem do link de pagamento (sem o teclado de produtos)
+                # Oculta o teclado de produtos ao mostrar o link de pagamento
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
                 return jsonify({'status': 'ok'}), 200
 
             else:
                 mensagem_resposta = f"Desculpe, não entendi o comando <b>{texto_recebido}</b>. Use /start ou /produtos."
                 
-                # Resposta padrão
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
                 return jsonify({'status': 'ok'}), 200
 
@@ -208,7 +208,6 @@ def telegram_webhook():
 
 
 # --- ROTA: RECEBE NOTIFICAÇÕES DO MERCADO PAGO ---
-# ESTA ROTA PERMANECE INALTERADA E GARANTE A ENTREGA APÓS O PAGAMENTO.
 @app.route('/notificacao', methods=['POST'])
 def notificacao():
     """Recebe a notificação de pagamento do Mercado Pago e envia o produto."""
@@ -244,7 +243,6 @@ def notificacao():
                 if product_data:
                     link = product_data["link"]
                     mensagem = f"🎉 Pagamento confirmado! Seu produto já está disponível:\n\n<b>Produto:</b> {produto_nome}\n<b>Acesse aqui:</b> <a href=\"{link}\">{link}</a>"
-                    # Entrega o link do Drive!
                     enviar_mensagem_telegram(telegram_user_id, mensagem) 
                     return "OK", 200
                 else:
