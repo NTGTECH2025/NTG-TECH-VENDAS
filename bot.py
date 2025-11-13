@@ -12,7 +12,7 @@ app = Flask(__name__)
 RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com" 
 
 if not MERCADO_PAGO_ACCESS_TOKEN:
-    print("AVISO: MERCADO_PAGO_ACCESS_TOKEN ausente.")
+    print("AVISO: MERCADO_PAGO_ACCESS_TOKEN ausente. A geração do checkout irá falhar.")
 if not TELEGRAM_BOT_TOKEN:
     print("AVISO: TELEGRAM_BOT_TOKEN ausente. O bot não poderá responder.")
 
@@ -23,7 +23,7 @@ PRODUCTS_DATA = {
     "PHOTOSHOP 2024": {"price": 8.00, "link": "https://drive.google.com/file/d/1wt3EKXIHdopKeFBLG0pEuPWJ2Of4ZrAx/view?usp=sharing"},
     "PHOTOSHOP 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1w0Uyjga1SZRveeStUWWZoz4OxH-tVA3g/view?usp=sharing"},
     "INDESIGN 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1vZM63AjyRh8FnNn06UjhN49BLSNcXe7Y/view?usp=sharing"},
-    "PREMIERE 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1QWXJNYVPJ319rXLlDbtf9mdnkEvudMbW/view?usp=sharing"},
+    "PREMIERE 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1QWXJNYVPJ319rXLlDbtf9mdnkEvudMbW/view?usp=drive_link"},
     "ADOBE ACROBAT DC 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/11g0c9RJoOg0qkF7ucMGN6PGL28USKnmM/view?usp=drive_link"},
     "REVIT 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/SEU_LINK_REVIT_AQUI/view?usp=sharing"},
     "SKETCHUP 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/SEU_LINK_SKETCHUP_AQUI/view?usp=sharing"},
@@ -38,6 +38,7 @@ def get_product_data(product_name):
     return PRODUCTS_DATA.get(product_name.upper())
 
 def enviar_mensagem_telegram(chat_id, texto, reply_markup=None): 
+    """Envia uma mensagem (pode ser com Reply Keyboard ou Inline Keyboard)."""
     if not TELEGRAM_BOT_TOKEN:
         print("Erro: TELEGRAM_BOT_TOKEN ausente.")
         return
@@ -49,25 +50,62 @@ def enviar_mensagem_telegram(chat_id, texto, reply_markup=None):
         "parse_mode": "HTML",
     }
     
-    # Adiciona o reply_markup, que deve ser um dicionário Python
     if reply_markup:
          payload["reply_markup"] = reply_markup
          
     try:
-        # Tenta enviar a mensagem para o Telegram
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        
-        # DEBUG: Imprime se o Telegram retornou um erro específico, mesmo com status 200
-        response_json = response.json()
-        if not response_json.get("ok"):
-             print(f"ERRO API TELEGRAM (Resposta): {response_json.get('description', 'Erro desconhecido')}")
         
     except requests.exceptions.RequestException as e:
         print(f"ERRO CRÍTICO: Falha ao enviar mensagem para o Telegram. Erro: {e}")
 
+def enviar_link_mp(chat_id, produto_nome, message_id):
+    """
+    Gera o link de pagamento do Mercado Pago e EDITA a mensagem do Telegram 
+    para mostrar o link e remover os botões.
+    """
+    produto_data = PRODUCTS_DATA.get(produto_nome.upper())
+
+    if not produto_data:
+        print(f"ERRO: Produto {produto_nome} não encontrado para gerar link.")
+        mensagem_resposta = "❌ Produto não encontrado. Use /produtos para tentar novamente."
+        link_pagamento = None
+    else:
+        # 1. Tenta criar o link de pagamento dinamicamente
+        link_pagamento = criar_preferencia_mp(
+            produto_nome=produto_nome,
+            preco=produto_data['price'],
+            chat_id=chat_id
+        )
+
+        if link_pagamento:
+            mensagem_resposta = (
+                f"✅ Link Gerado: <b>{produto_nome}</b> (R$ {produto_data['price']:.2f})\n\n"
+                f"Acesse o link abaixo para finalizar a compra via Mercado Pago:\n"
+                f"<a href=\"{link_pagamento}\">{link_pagamento}</a>"
+            )
+        else:
+            mensagem_resposta = "❌ Desculpe, houve um erro ao gerar o link de pagamento. Tente novamente mais tarde."
+
+    # 2. Edita a mensagem anterior (que tinha os botões)
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": mensagem_resposta,
+        "parse_mode": "HTML",
+        # Remove o teclado inline após gerar o link
+        "reply_markup": {"inline_keyboard": []} 
+    }
+    try:
+        requests.post(url, json=payload).raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"ERRO ao editar mensagem no Telegram: {e}")
+
 def criar_preferencia_mp(produto_nome, preco, chat_id):
     """Cria uma preferência de pagamento dinamicamente no Mercado Pago."""
+    # (Lógica do MP permanece a mesma, pois já estava correta)
     if not MERCADO_PAGO_ACCESS_TOKEN:
         return None
 
@@ -118,77 +156,72 @@ def criar_preferencia_mp(produto_nome, preco, chat_id):
 def home():
     return 'Webhook do bot de vendas ativo no Render! Aguardando mensagens e notificações.'
 
-# --- ROTA: RECEBE MENSAGENS DO TELEGRAM ---
+# --- ROTA PRINCIPAL: RECEBE MENSAGENS E CLIQUES DE BOTÕES ---
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     try:
         update = request.get_json()
-        
-        if update and 'message' in update:
-            chat_id = update['message']['chat']['id']
-            texto_recebido = update['message'].get('text', '').strip()
+
+        # 1. PROCESSA CLIQUES NOS BOTÕES INLINE (callback_query)
+        if 'callback_query' in update:
+            callback_query = update['callback_query']
+            callback_data = callback_query['data']
+            chat_id = callback_query['message']['chat']['id']
+            message_id = callback_query['message']['message_id']
+
+            comando = callback_data.upper() 
+            
+            # Avisa o Telegram que a query foi recebida (remove o "loading" no botão)
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", 
+                json={"callback_query_id": callback_query['id']}
+            )
+            
+            if comando in PRODUCTS_DATA:
+                # Chama a função para gerar o link MP e editar a mensagem
+                enviar_link_mp(chat_id, comando, message_id)
+                
+            return jsonify({'status': 'ok - callback handled'}), 200
+
+
+        # 2. PROCESSA MENSAGENS DE TEXTO (/start, /produtos)
+        if 'message' in update:
+            message = update['message']
+            chat_id = message['chat']['id']
+            texto_recebido = message.get('text', '').strip()
             
             comando = texto_recebido.upper() 
             
-            # Estrutura para esconder o teclado quando necessário
+            # Estrutura para esconder teclados Reply antigos
             hide_keyboard = {"remove_keyboard": True}
 
             if comando == "/START":
-                mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use /produtos para ver nosso catálogo e selecione um produto para iniciar o pagamento."
+                mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use /produtos para ver nosso catálogo e clique no botão do produto para gerar seu link de pagamento."
                 
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
                 return jsonify({'status': 'ok'}), 200
 
-            # === BLOCO CHAVE: CRIA E MOSTRA OS BOTÕES (Reply Keyboard) ===
+            # === BLOCO CHAVE: CRIA E MOSTRA OS BOTÕES INLINE ===
             elif comando == "/PRODUTOS":
-                # 1. Cria a estrutura dos botões manualmente
-                # Cada lista interna [] é uma linha de botões
-                keyboard_buttons = [
-                    ["ILLUSTRATOR 2025"], 
-                    ["PHOTOSHOP 2024", "PHOTOSHOP 2025"], # Dois botões na mesma linha
-                    ["INDESIGN 2025", "PREMIERE 2025"], 
-                    ["ADOBE ACROBAT DC 2025", "AFTER EFFECTS 2025"],
-                    ["LIGHTROOM CLASSIC 2025"],
-                    ["REVIT 2025", "SKETCHUP 2025"], # Dois botões na mesma linha
-                    ["/start", "/produtos"] # Comandos úteis na última linha
-                ]
-
-                # 2. Monta o objeto Reply Keyboard (DICIONÁRIO PYTHON CORRETO)
-                reply_markup = {
-                    "keyboard": keyboard_buttons,
-                    "resize_keyboard": True,
-                    "one_time_keyboard": False # Deixa o teclado visível até ser removido
+                # 1. Constrói a lista de botões INLINE
+                inline_buttons = []
+                for name, data in PRODUCTS_DATA.items():
+                    # Cada botão tem o texto visível e o 'callback_data' que é enviado ao backend
+                    inline_buttons.append([
+                        {"text": f"🛒 {name} (R$ {data['price']:.2f})", "callback_data": name}
+                    ])
+                
+                # 2. Monta o objeto Inline Keyboard (NOVO FORMATO)
+                inline_markup = {
+                    "inline_keyboard": inline_buttons
                 }
 
-                mensagem_resposta = "🛍️ <b>Selecione o produto desejado abaixo:</b>"
+                mensagem_resposta = "🛍️ <b>Clique no botão do produto para gerar seu link de pagamento no Mercado Pago:</b>"
 
-                # 3. Envia a mensagem COM o teclado de produtos
-                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=reply_markup)
+                # 3. Envia a mensagem COM o teclado INLINE
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=inline_markup)
                 return jsonify({'status': 'ok'}), 200
                 
-            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP (Acionado pelos botões ou texto) ===
-            elif comando in PRODUCTS_DATA:
-                produto_data = PRODUCTS_DATA[comando]
-                
-                link_pagamento = criar_preferencia_mp(
-                    produto_nome=comando,
-                    preco=produto_data['price'],
-                    chat_id=chat_id
-                )
-                
-                if link_pagamento:
-                    mensagem_resposta = (
-                        f"🛒 Você selecionou: <b>{comando}</b> (R$ {produto_data['price']:.2f})\n\n"
-                        f"Acesse o link abaixo para finalizar a compra via Mercado Pago:\n"
-                        f"<a href=\"{link_pagamento}\">{link_pagamento}</a>"
-                    )
-                else:
-                    mensagem_resposta = "❌ Desculpe, houve um erro ao gerar o link de pagamento. Por favor, verifique o Token do Mercado Pago (ACCESS_TOKEN) ou contate o suporte."
-                
-                # Oculta o teclado de produtos ao mostrar o link de pagamento
-                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
-                return jsonify({'status': 'ok'}), 200
-
             else:
                 mensagem_resposta = f"Desculpe, não entendi o comando <b>{texto_recebido}</b>. Use /start ou /produtos."
                 
@@ -206,7 +239,6 @@ def telegram_webhook():
 @app.route('/notificacao', methods=['POST'])
 def notificacao():
     """Recebe a notificação de pagamento do Mercado Pago e envia o produto."""
-    # (O código de notificação MP não foi alterado pois é robusto e não interfere no teclado)
     try:
         dados = request.json
 
@@ -256,5 +288,4 @@ def notificacao():
 @app.route('/produtos', methods=['GET'])
 def get_products():
     """Rota auxiliar para listagem."""
-    # (Não alterado)
     # ... código ...
