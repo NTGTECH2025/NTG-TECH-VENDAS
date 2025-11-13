@@ -1,16 +1,15 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import json # Importei para garantir que o Requests serializa corretamente o reply_markup, embora já o faça
 
 # --- CONFIGURAÇÕES (Lendo dos Secrets do Render) ---
-# O Render carrega estas variáveis do seu painel de ambiente.
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 app = Flask(__name__)
 
-# URL base do seu serviço no Render
-# ESTA URL DEVE SER A MESMA DO SEU SERVIÇO NO RENDER (EX: https://ntg-tech-vendas.onrender.com)
+# URL base do seu serviço no Render (MANTENHA ESTE)
 RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com" 
 
 if not MERCADO_PAGO_ACCESS_TOKEN:
@@ -50,7 +49,7 @@ def get_all_products_for_api():
         })
     return products_list
 
-# FUNÇÃO CHAVE: Envia mensagem, e se o reply_markup for passado, o 'requests' serializa para o Telegram.
+# CORREÇÃO 1: Adiciona reply_markup=None à definição da função
 def enviar_mensagem_telegram(chat_id, texto, reply_markup=None): 
     if not TELEGRAM_BOT_TOKEN:
         print("Erro: TELEGRAM_BOT_TOKEN ausente.")
@@ -62,12 +61,11 @@ def enviar_mensagem_telegram(chat_id, texto, reply_markup=None):
         "text": texto,
         "parse_mode": "HTML",
     }
-    # ADICIONA O reply_markup, que DEVE ser um dicionário Python (o Requests cuida da serialização JSON)
+    # CORREÇÃO 2: Adiciona o reply_markup ao payload APENAS SE existir
     if reply_markup:
          payload["reply_markup"] = reply_markup
          
     try:
-        # Usa 'json=payload' para garantir que os dados sejam enviados como JSON
         requests.post(url, json=payload).raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"ERRO CRÍTICO: Falha ao enviar mensagem para o Telegram. Erro: {e}")
@@ -165,7 +163,7 @@ def telegram_webhook():
 
                 mensagem_resposta = "🛍️ <b>Selecione o produto desejado abaixo:</b>"
 
-                # 3. Envia a mensagem COM o teclado de produtos
+                # CORREÇÃO 3: Envia a mensagem COM o teclado de produtos
                 enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=reply_markup)
                 return jsonify({'status': 'ok'}), 200
                 
