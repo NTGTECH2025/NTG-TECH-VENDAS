@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import json # Importar para criar o payload JSON do teclado
 
 # --- CONFIGURAÇÕES (Lendo dos Secrets do Render) ---
 # O Render carrega estas variáveis do seu painel de ambiente.
@@ -50,7 +51,8 @@ def get_all_products_for_api():
         })
     return products_list
 
-def enviar_mensagem_telegram(chat_id, texto):
+# FUNÇÃO MODIFICADA PARA ACEITAR O TECLADO (reply_markup)
+def enviar_mensagem_telegram(chat_id, texto, reply_markup=None): 
     if not TELEGRAM_BOT_TOKEN:
         return
 
@@ -58,7 +60,10 @@ def enviar_mensagem_telegram(chat_id, texto):
     payload = {
         "chat_id": chat_id,
         "text": texto,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        # Inclui o objeto do teclado (se for None, o teclado atual é mantido)
+        # Se for um teclado novo (como o de produtos), ele substitui o anterior
+        "reply_markup": reply_markup 
     }
     try:
         requests.post(url, json=payload).raise_for_status()
@@ -76,7 +81,6 @@ def criar_preferencia_mp(produto_nome, preco, chat_id):
         "Content-Type": "application/json"
     }
     
-    # URL de notificação completa (para avisar o Render sobre o pagamento)
     notification_url = f"{RENDER_BASE_URL}/notificacao"
 
     payload = {
@@ -88,8 +92,8 @@ def criar_preferencia_mp(produto_nome, preco, chat_id):
             }
         ],
         "metadata": {
-            "telegram_user_id": str(chat_id), # ID do usuário para entrega
-            "produto": produto_nome            # Nome do produto para buscar o link do Drive
+            "telegram_user_id": str(chat_id),
+            "produto": produto_nome            
         },
         "notification_url": notification_url,
         "back_urls": {
@@ -130,23 +134,45 @@ def telegram_webhook():
             
             comando = texto_recebido.upper() 
             
-            if comando == "/START":
-                mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use /produtos para ver nosso catálogo e siga as instruções para iniciar o pagamento."
-            
-            elif comando == "/PRODUTOS":
-                produtos = get_all_products_for_api()
-                
-                mensagem_resposta = "🛍️ <b>Nossos Produtos Disponíveis:</b>\n\n"
-                for p in produtos:
-                    mensagem_resposta += f"🔹 <b>{p['name']}</b> - R$ {p['price']:.2f}\n"
+            # Teclado padrão para comandos iniciais (oculta o teclado de produtos)
+            hide_keyboard = json.dumps({"remove_keyboard": True})
 
-                mensagem_resposta += "\n💡 **Para Comprar:** Digite o nome exato do produto que deseja (Exemplo: PHOTOSHOP 2025) para receber o link de pagamento."
+            if comando == "/START":
+                mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use /produtos para ver nosso catálogo e selecione um produto para iniciar o pagamento."
                 
-            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP ===
+                # Envia mensagem sem teclado, ou com um teclado de comandos básicos se preferir
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
+                return jsonify({'status': 'ok'}), 200
+
+            # === BLOCO MODIFICADO: MOSTRA OS PRODUTOS COMO BOTÕES ===
+            elif comando == "/PRODUTOS":
+                # 1. Cria a estrutura dos botões de teclado (Reply Keyboard)
+                keyboard_buttons = []
+                # Adiciona cada produto como um botão (uma linha por produto)
+                for name in PRODUCTS_DATA.keys():
+                    keyboard_buttons.append([name]) 
+                
+                # Adiciona comandos úteis na última linha
+                keyboard_buttons.append(["/start"]) # Oculta o /produtos para evitar duplicidade
+
+                # 2. Monta o objeto Reply Keyboard
+                reply_markup = json.dumps({
+                    "keyboard": keyboard_buttons,
+                    "resize_keyboard": True,
+                    "one_time_keyboard": False
+                })
+
+                mensagem_resposta = "🛍️ <b>Selecione o produto desejado abaixo:</b>"
+
+                # 3. Envia a mensagem COM o teclado de produtos e retorna
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=reply_markup)
+                return jsonify({'status': 'ok'}), 200
+                
+            # === LÓGICA DE GERAÇÃO DE CHECKOUT MP (Também ativado pelo clique no botão) ===
             elif comando in PRODUCTS_DATA:
                 produto_data = PRODUCTS_DATA[comando]
                 
-                # 1. Tenta criar o link de pagamento dinamicamente
+                # Tenta criar o link de pagamento dinamicamente
                 link_pagamento = criar_preferencia_mp(
                     produto_nome=comando,
                     preco=produto_data['price'],
@@ -162,12 +188,18 @@ def telegram_webhook():
                 else:
                     mensagem_resposta = "❌ Desculpe, houve um erro ao gerar o link de pagamento. Por favor, verifique o Token do Mercado Pago (ACCESS_TOKEN) ou contate o suporte."
                 
+                # Envia mensagem do link de pagamento (sem o teclado de produtos)
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
+                return jsonify({'status': 'ok'}), 200
+
             else:
                 mensagem_resposta = f"Desculpe, não entendi o comando <b>{texto_recebido}</b>. Use /start ou /produtos."
                 
-            enviar_mensagem_telegram(chat_id, mensagem_resposta)
+                # Resposta padrão
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=hide_keyboard)
+                return jsonify({'status': 'ok'}), 200
 
-        # Retorno 200 OK é obrigatório para o Telegram
+        # Retorno 200 OK é obrigatório para o Telegram (caso o update não tenha 'message')
         return jsonify({'status': 'ok'}), 200
     
     except Exception as e:
@@ -176,6 +208,7 @@ def telegram_webhook():
 
 
 # --- ROTA: RECEBE NOTIFICAÇÕES DO MERCADO PAGO ---
+# ESTA ROTA PERMANECE INALTERADA E GARANTE A ENTREGA APÓS O PAGAMENTO.
 @app.route('/notificacao', methods=['POST'])
 def notificacao():
     """Recebe a notificação de pagamento do Mercado Pago e envia o produto."""
@@ -211,7 +244,8 @@ def notificacao():
                 if product_data:
                     link = product_data["link"]
                     mensagem = f"🎉 Pagamento confirmado! Seu produto já está disponível:\n\n<b>Produto:</b> {produto_nome}\n<b>Acesse aqui:</b> <a href=\"{link}\">{link}</a>"
-                    enviar_mensagem_telegram(telegram_user_id, mensagem)
+                    # Entrega o link do Drive!
+                    enviar_mensagem_telegram(telegram_user_id, mensagem) 
                     return "OK", 200
                 else:
                     print(f"ERRO: Produto '{produto_nome}' não encontrado na lista. Entrega manual necessária.")
