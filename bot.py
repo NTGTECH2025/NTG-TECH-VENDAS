@@ -10,20 +10,20 @@ app = Flask(__name__)
 RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com"
 
 # =============================
+# CONTROLE DE MENSAGENS
+# =============================
+
+ULTIMA_MSG = {}
+
+# =============================
 # PRODUTOS
 # =============================
 
 PRODUCTS_DATA = {
-    "ILLUSTRATOR 2025": {"price": 9.00, "link": "https://drive.google.com/drive/folders/1x1JQV47hebrLQe_GF4eq32oQgMt2E5CA?usp=drive_link"},
-    "AUTOCAD 2026": {"price": 10.00, "link": "https://drive.google.com/file/d/1ajnOUzxLDfSOeXTJHCLJ1DiGjYDeW6o8/view?usp=drive_link"},
-    "PHOTOSHOP 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1w0Uyjga1SZRveeStUWWZoz4OxH-tVA3g/view?usp=sharing"},
-    "INDESIGN 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1vZM63AjyRh8FnNn06UjhN49BLSNcXe7Y/view?usp=sharing"},
-    "PREMIERE 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1QWXJNYVPJ319rXLlDbtf9mdnkEvudMbW/view?usp=drive_link"},
-    "ADOBE ACROBAT DC 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/11g0c9RJoOg0qkF7ucMGN6PGL28USKnmM/view?usp=drive_link"},
-    "REVIT 2026": {"price": 10.00, "link": "https://drive.google.com/file/d/1BaYFpzNPLWRAiqcX6qQYxAJijF8k2Do2/view?usp=drive_link"},
-    "SKETCHUP 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/16me_DDq2UTwSI3hT0Q55F7JhLBi0ykW-/view?usp=sharing"},
-    "AFTER EFFECTS 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1fvxYC41vLa51wO1noCy7PgFwSlaEBbad/view?usp=sharing"},
-    "LIGHTROOM CLASSIC 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/19imV-3YRbViFw-EMHh4ivS9ok2Sqv0un/view?usp=sharing"}
+    "PHOTOSHOP 2025": {
+        "price": 10.00,
+        "link": "https://drive.google.com/file/d/1w0Uyjga1SZRveeStUWWZoz4OxH-tVA3g/view?usp=sharing"
+    }
 }
 
 # =============================
@@ -34,18 +34,6 @@ INSTALL_VIDEOS = {
     "INSTALAR_PS": {
         "nome": "PHOTOSHOP 2025",
         "link": "https://www.youtube.com/watch?v=apkQG3PTt-0"
-    },
-    "INSTALAR_AI": {
-        "nome": "ILLUSTRATOR 2025",
-        "link": "https://link-do-youtube"
-    },
-    "INSTALAR_PREMIERE": {
-        "nome": "PREMIERE 2025",
-        "link": "https://link-do-youtube"
-    },
-    "INSTALAR_AE": {
-        "nome": "AFTER EFFECTS 2025",
-        "link": "https://link-do-youtube"
     }
 }
 
@@ -62,20 +50,49 @@ def menu_principal():
     }
 
 # =============================
-# ENVIAR MENSAGEM
+# ENVIAR MENSAGEM (AUTO LIMPEZA)
 # =============================
 
 def enviar(chat_id, texto, markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    global ULTIMA_MSG
 
-    payload = {
-        "chat_id": chat_id,
-        "text": texto,
-        "parse_mode": "HTML",
-        "reply_markup": markup or menu_principal()
-    }
+    # apagar mensagem anterior
+    if chat_id in ULTIMA_MSG:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteMessage",
+            json={
+                "chat_id": chat_id,
+                "message_id": ULTIMA_MSG[chat_id]
+            }
+        )
 
-    requests.post(url, json=payload)
+    r = requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": texto,
+            "parse_mode": "HTML",
+            "reply_markup": markup or menu_principal()
+        }
+    )
+
+    if r.status_code == 200:
+        ULTIMA_MSG[chat_id] = r.json()["result"]["message_id"]
+
+# =============================
+# ENVIAR GIF
+# =============================
+
+def enviar_gif(chat_id):
+    gif_url = "https://media.giphy.com/media/111ebonMs90YLu/giphy.gif"
+
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendAnimation",
+        json={
+            "chat_id": chat_id,
+            "animation": gif_url
+        }
+    )
 
 # =============================
 # MERCADO PAGO
@@ -117,7 +134,6 @@ def criar_preferencia(produto, preco, chat_id):
 def telegram_webhook():
     update = request.get_json()
 
-    # CALLBACK
     if "callback_query" in update:
         q = update["callback_query"]
         data = q["data"]
@@ -128,7 +144,6 @@ def telegram_webhook():
             json={"callback_query_id": q["id"]}
         )
 
-        # MENU PRODUTOS
         if data == "MENU_PRODUTOS":
             botoes = []
 
@@ -139,11 +154,10 @@ def telegram_webhook():
 
             botoes.append([{"text": "⬅️ Voltar", "callback_data": "MENU"}])
 
-            enviar(chat_id, "🛍️ <b>Escolha o produto:</b>", {
+            enviar(chat_id, "🛍️ Escolha o produto:", {
                 "inline_keyboard": botoes
             })
 
-        # MENU INSTALAR
         elif data == "MENU_INSTALAR":
             botoes = []
 
@@ -154,46 +168,33 @@ def telegram_webhook():
 
             botoes.append([{"text": "⬅️ Voltar", "callback_data": "MENU"}])
 
-            enviar(chat_id, "📦 <b>Escolha o tutorial:</b>", {
+            enviar(chat_id, "📦 Escolha o tutorial:", {
                 "inline_keyboard": botoes
             })
 
-        # VOLTAR MENU
         elif data == "MENU":
-            enviar(chat_id, "🏠 <b>Menu principal:</b>", menu_principal())
+            enviar(chat_id, "🏠 Menu principal:", menu_principal())
 
-        # COMPRA
         elif data in PRODUCTS_DATA:
             p = PRODUCTS_DATA[data]
             link = criar_preferencia(data, p["price"], chat_id)
 
-            enviar(
-                chat_id,
-                f"✅ <b>{data}</b>\n<a href=\"{link}\">Clique aqui para pagar</a>"
-            )
+            enviar(chat_id, f"✅ {data}\nClique para pagar:\n{link}")
 
-        # INSTALAÇÃO
         elif data in INSTALL_VIDEOS:
             v = INSTALL_VIDEOS[data]
-
-            enviar(
-                chat_id,
-                f"📦 <b>{v['nome']}</b>\n<a href=\"{v['link']}\">Assistir tutorial</a>"
-            )
+            enviar(chat_id, f"📦 {v['nome']}\n{v['link']}")
 
         return jsonify(ok=True)
 
-    # MENSAGENS
     if "message" in update:
-        msg = update["message"]
-        chat_id = msg["chat"]["id"]
-
-        enviar(chat_id, "👋 <b>Bem-vindo!</b>\nEscolha uma opção:")
+        chat_id = update["message"]["chat"]["id"]
+        enviar(chat_id, "👋 Bem-vindo! Escolha uma opção:")
 
     return jsonify(ok=True)
 
 # =============================
-# PAGAMENTO
+# PAGAMENTO APROVADO
 # =============================
 
 @app.route('/notificacao', methods=['POST'])
@@ -224,9 +225,11 @@ def notificacao():
     if produto in PRODUCTS_DATA:
         link = PRODUCTS_DATA[produto]["link"]
 
+        enviar_gif(chat_id)
+
         enviar(
             chat_id,
-            f"🎉 Pagamento confirmado!\n\n{produto}\n<a href=\"{link}\">Baixar aqui</a>"
+            f"🎉 Pagamento confirmado!\n\n{produto}\nBaixar:\n{link}"
         )
 
     return "OK"
