@@ -10,7 +10,13 @@ app = Flask(__name__)
 RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com"
 
 # =============================
-# PRODUTOS
+# CONTROLE DE MENSAGENS
+# =============================
+
+ULTIMA_MSG = {}
+
+# =============================
+# PRODUTOS (COMPRA)
 # =============================
 
 PRODUCTS_DATA = {
@@ -27,7 +33,7 @@ PRODUCTS_DATA = {
 }
 
 # =============================
-# VÍDEOS
+# VÍDEOS DE INSTALAÇÃO
 # =============================
 
 INSTALL_VIDEOS = {
@@ -50,32 +56,39 @@ INSTALL_VIDEOS = {
 }
 
 # =============================
-# MENU PRINCIPAL
+# ENVIAR MENSAGEM (COM LIMPEZA)
 # =============================
 
-def menu_principal():
-    return {
-        "inline_keyboard": [
-            [{"text": "🛒 Produtos", "callback_data": "MENU_PRODUTOS"}],
-            [{"text": "📦 Instalar", "callback_data": "MENU_INSTALAR"}]
-        ]
-    }
+def enviar_mensagem(chat_id, texto, markup=None):
+    global ULTIMA_MSG
 
-# =============================
-# ENVIAR MENSAGEM
-# =============================
-
-def enviar(chat_id, texto, markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # apagar mensagem anterior do bot
+    if chat_id in ULTIMA_MSG:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/deleteMessage",
+            json={
+                "chat_id": chat_id,
+                "message_id": ULTIMA_MSG[chat_id]
+            }
+        )
 
     payload = {
         "chat_id": chat_id,
         "text": texto,
-        "parse_mode": "HTML",
-        "reply_markup": markup or menu_principal()
+        "parse_mode": "HTML"
     }
 
-    requests.post(url, json=payload)
+    if markup:
+        payload["reply_markup"] = markup
+
+    r = requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+        json=payload
+    )
+
+    # salvar nova mensagem
+    if r.status_code == 200:
+        ULTIMA_MSG[chat_id] = r.json()["result"]["message_id"]
 
 # =============================
 # MERCADO PAGO
@@ -110,26 +123,75 @@ def criar_preferencia(produto, preco, chat_id):
     return None
 
 # =============================
-# TELEGRAM WEBHOOK
+# WEBHOOK TELEGRAM
 # =============================
 
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
     update = request.get_json()
 
-    # CALLBACK
     if "callback_query" in update:
         q = update["callback_query"]
         data = q["data"]
         chat_id = q["message"]["chat"]["id"]
+        msg_id = q["message"]["message_id"]
 
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
             json={"callback_query_id": q["id"]}
         )
 
-        # MENU PRODUTOS
-        if data == "MENU_PRODUTOS":
+        if data in PRODUCTS_DATA:
+            p = PRODUCTS_DATA[data]
+            link = criar_preferencia(data, p["price"], chat_id)
+
+            texto = f"✅ <b>{data}</b>\n<a href=\"{link}\">Clique aqui para pagar</a>"
+
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": msg_id,
+                    "text": texto,
+                    "parse_mode": "HTML"
+                }
+            )
+
+        elif data in INSTALL_VIDEOS:
+            v = INSTALL_VIDEOS[data]
+
+            texto = (
+                f"📦 <b>Tutorial:</b>\n\n"
+                f"{v['nome']}\n"
+                f"<a href=\"{v['link']}\">Assistir no YouTube</a>"
+            )
+
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": msg_id,
+                    "text": texto,
+                    "parse_mode": "HTML"
+                }
+            )
+
+        return jsonify(ok=True)
+
+    if "message" in update:
+        msg = update["message"]
+        chat_id = msg["chat"]["id"]
+        texto = msg.get("text", "").upper()
+
+        if texto == "/START":
+            enviar_mensagem(
+                chat_id,
+                "👋 <b>Bem-vindo!</b>\n\n"
+                "/produtos — Comprar\n"
+                "/instalar — Tutoriais"
+            )
+
+        elif texto == "/PRODUTOS":
             botoes = []
 
             for nome, d in PRODUCTS_DATA.items():
@@ -137,14 +199,13 @@ def telegram_webhook():
                     {"text": f"🛒 {nome} (R$ {d['price']:.2f})", "callback_data": nome}
                 ])
 
-            botoes.append([{"text": "⬅️ Voltar", "callback_data": "MENU"}])
+            enviar_mensagem(
+                chat_id,
+                "🛍️ <b>Escolha o produto:</b>",
+                {"inline_keyboard": botoes}
+            )
 
-            enviar(chat_id, "🛍️ <b>Escolha o produto:</b>", {
-                "inline_keyboard": botoes
-            })
-
-        # MENU INSTALAR
-        elif data == "MENU_INSTALAR":
+        elif texto == "/INSTALAR":
             botoes = []
 
             for chave, v in INSTALL_VIDEOS.items():
@@ -152,48 +213,22 @@ def telegram_webhook():
                     {"text": f"📦 {v['nome']}", "callback_data": chave}
                 ])
 
-            botoes.append([{"text": "⬅️ Voltar", "callback_data": "MENU"}])
-
-            enviar(chat_id, "📦 <b>Escolha o tutorial:</b>", {
-                "inline_keyboard": botoes
-            })
-
-        # VOLTAR MENU
-        elif data == "MENU":
-            enviar(chat_id, "🏠 <b>Menu principal:</b>", menu_principal())
-
-        # COMPRA
-        elif data in PRODUCTS_DATA:
-            p = PRODUCTS_DATA[data]
-            link = criar_preferencia(data, p["price"], chat_id)
-
-            enviar(
+            enviar_mensagem(
                 chat_id,
-                f"✅ <b>{data}</b>\n<a href=\"{link}\">Clique aqui para pagar</a>"
+                "📦 <b>Escolha o tutorial:</b>",
+                {"inline_keyboard": botoes}
             )
 
-        # INSTALAÇÃO
-        elif data in INSTALL_VIDEOS:
-            v = INSTALL_VIDEOS[data]
-
-            enviar(
+        else:
+            enviar_mensagem(
                 chat_id,
-                f"📦 <b>{v['nome']}</b>\n<a href=\"{v['link']}\">Assistir tutorial</a>"
+                "❌ Comando incorreto.\n👉 Clique em /start"
             )
-
-        return jsonify(ok=True)
-
-    # MENSAGENS
-    if "message" in update:
-        msg = update["message"]
-        chat_id = msg["chat"]["id"]
-
-        enviar(chat_id, "👋 <b>Bem-vindo!</b>\nEscolha uma opção:")
 
     return jsonify(ok=True)
 
 # =============================
-# PAGAMENTO
+# NOTIFICAÇÃO PAGAMENTO
 # =============================
 
 @app.route('/notificacao', methods=['POST'])
@@ -224,9 +259,11 @@ def notificacao():
     if produto in PRODUCTS_DATA:
         link = PRODUCTS_DATA[produto]["link"]
 
-        enviar(
+        enviar_mensagem(
             chat_id,
-            f"🎉 Pagamento confirmado!\n\n{produto}\n<a href=\"{link}\">Baixar aqui</a>"
+            f"🎉 Pagamento confirmado!\n\n"
+            f"{produto}\n"
+            f"<a href=\"{link}\">Baixar aqui</a>"
         )
 
     return "OK"
