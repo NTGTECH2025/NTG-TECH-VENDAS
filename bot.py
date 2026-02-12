@@ -15,6 +15,7 @@ RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com"
 
 PRODUCTS_DATA = {
     "ILLUSTRATOR 2025": {"price": 9.00, "link": "https://drive.google.com/drive/folders/1x1JQV47hebrLQe_GF4eq32oQgMt2E5CA?usp=drive_link"},
+    "ILLUSTRATOR 2026": {"price": 14.00, "link": "https://drive.google.com/drive/folders/1-CRR3E51FI2hxXgPoFF2EOZgeJNJ2nex?usp=sharing"},
     "AUTOCAD 2026": {"price": 10.00, "link": "https://drive.google.com/file/d/1ajnOUzxLDfSOeXTJHCLJ1DiGjYDeW6o8/view?usp=drive_link"},
     "PHOTOSHOP 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1w0Uyjga1SZRveeStUWWZoz4OxH-tVA3g/view?usp=sharing"},
     "INDESIGN 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/1vZM63AjyRh8FnNn06UjhN49BLSNcXe7Y/view?usp=sharing"},
@@ -117,7 +118,6 @@ def criar_preferencia(produto, preco, chat_id):
 def telegram_webhook():
     update = request.get_json()
 
-    # CALLBACK
     if "callback_query" in update:
         q = update["callback_query"]
         data = q["data"]
@@ -128,7 +128,6 @@ def telegram_webhook():
             json={"callback_query_id": q["id"]}
         )
 
-        # MENU PRODUTOS
         if data == "MENU_PRODUTOS":
             botoes = []
 
@@ -143,7 +142,6 @@ def telegram_webhook():
                 "inline_keyboard": botoes
             })
 
-        # MENU INSTALAR
         elif data == "MENU_INSTALAR":
             botoes = []
 
@@ -158,11 +156,9 @@ def telegram_webhook():
                 "inline_keyboard": botoes
             })
 
-        # VOLTAR MENU
         elif data == "MENU":
             enviar(chat_id, "🏠 <b>Menu principal:</b>", menu_principal())
 
-        # COMPRA
         elif data in PRODUCTS_DATA:
             p = PRODUCTS_DATA[data]
             link = criar_preferencia(data, p["price"], chat_id)
@@ -172,7 +168,6 @@ def telegram_webhook():
                 f"✅ <b>{data}</b>\n<a href=\"{link}\">Clique aqui para pagar</a>"
             )
 
-        # INSTALAÇÃO
         elif data in INSTALL_VIDEOS:
             v = INSTALL_VIDEOS[data]
 
@@ -183,7 +178,6 @@ def telegram_webhook():
 
         return jsonify(ok=True)
 
-    # MENSAGENS
     if "message" in update:
         msg = update["message"]
         chat_id = msg["chat"]["id"]
