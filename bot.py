@@ -10,7 +10,19 @@ app = Flask(__name__)
 RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com"
 
 # =============================
-# PRODUTOS
+# MENU FIXO (BOTÕES)
+# =============================
+
+MAIN_MENU = {
+    "keyboard": [
+        ["🛒 Produtos", "📦 Instalar"],
+        ["▶️ Start"]
+    ],
+    "resize_keyboard": True
+}
+
+# =============================
+# PRODUTOS (COMPRA)
 # =============================
 
 PRODUCTS_DATA = {
@@ -27,31 +39,30 @@ PRODUCTS_DATA = {
 }
 
 # =============================
-# VÍDEOS
+# VÍDEOS DE INSTALAÇÃO
 # =============================
 
 INSTALL_VIDEOS = {
     "INSTALAR_PS": {
         "nome": "PHOTOSHOP 2025",
         "link": "https://www.youtube.com/watch?v=apkQG3PTt-0"
+    },
+    "INSTALAR_AI": {
+        "nome": "ILLUSTRATOR 2025",
+        "link": "https://link-do-youtube"
+    },
+    "INSTALAR_PREMIERE": {
+        "nome": "PREMIERE 2025",
+        "link": "https://link-do-youtube"
+    },
+    "INSTALAR_AE": {
+        "nome": "AFTER EFFECTS 2025",
+        "link": "https://link-do-youtube"
     }
 }
 
 # =============================
-# BOTÕES FIXOS
-# =============================
-
-MAIN_MENU = {
-    "keyboard": [
-        [{"text": "🛒 Produtos"}, {"text": "📦 Instalar"}],
-        [{"text": "▶️ Start"}]
-    ],
-    "resize_keyboard": True,
-    "one_time_keyboard": False
-}
-
-# =============================
-# FUNÇÃO MENSAGEM
+# ENVIAR MENSAGEM
 # =============================
 
 def enviar_mensagem(chat_id, texto, markup=None):
@@ -109,7 +120,7 @@ def criar_preferencia(produto, preco, chat_id):
 def telegram_webhook():
     update = request.get_json()
 
-    # ===== BOTÕES INLINE =====
+    # CALLBACK BOTÕES INLINE
     if "callback_query" in update:
         q = update["callback_query"]
         data = q["data"]
@@ -158,20 +169,18 @@ def telegram_webhook():
 
         return jsonify(ok=True)
 
-    # ===== MENSAGENS =====
+    # MENSAGENS NORMAIS
     if "message" in update:
         msg = update["message"]
         chat_id = msg["chat"]["id"]
         texto = msg.get("text", "").upper()
 
-        # START
         if texto in ["/START", "▶️ START"]:
             enviar_mensagem(
                 chat_id,
-                "👋 <b>Bem-vindo!</b>\nEscolha uma opção abaixo:"
+                "👋 <b>Bem-vindo!</b>\n\nUse os botões abaixo:"
             )
 
-        # PRODUTOS
         elif texto in ["/PRODUTOS", "🛒 PRODUTOS"]:
             botoes = []
 
@@ -186,7 +195,6 @@ def telegram_webhook():
                 {"inline_keyboard": botoes}
             )
 
-        # INSTALAR
         elif texto in ["/INSTALAR", "📦 INSTALAR"]:
             botoes = []
 
@@ -201,17 +209,16 @@ def telegram_webhook():
                 {"inline_keyboard": botoes}
             )
 
-        # ERRO
         else:
             enviar_mensagem(
                 chat_id,
-                "❌ Comando inválido. Use os botões abaixo."
+                "❌ Comando incorreto.\nUse os botões abaixo."
             )
 
     return jsonify(ok=True)
 
 # =============================
-# PAGAMENTO CONFIRMADO
+# NOTIFICAÇÃO PAGAMENTO
 # =============================
 
 @app.route('/notificacao', methods=['POST'])
