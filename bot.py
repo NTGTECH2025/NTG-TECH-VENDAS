@@ -2,14 +2,22 @@ from flask import Flask, request, jsonify
 import requests
 import os
 
-# --- CONFIGURAÇÕES ---
+# --- CONFIGURAÇÕES (Lendo dos Secrets do Render) ---
 MERCADO_PAGO_ACCESS_TOKEN = os.environ.get("MERCADO_PAGO_ACCESS_TOKEN")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com" 
 
 app = Flask(__name__)
 
-# --- LISTA DE PRODUTOS ---
+# URL base do seu serviço no Render (MANTENHA ESTE)
+RENDER_BASE_URL = "https://ntg-tech-vendas.onrender.com" 
+
+if not MERCADO_PAGO_ACCESS_TOKEN:
+    print("AVISO: MERCADO_PAGO_ACCESS_TOKEN ausente. A geração do checkout irá falhar.")
+if not TELEGRAM_BOT_TOKEN:
+    print("AVISO: TELEGRAM_BOT_TOKEN ausente. O bot não poderá responder.")
+
+
+# --- LISTA DE PRODUTOS FIXA (Chave deve ser o nome em MAIÚSCULAS) ---
 PRODUCTS_DATA = {
     "ILLUSTRATOR 2025": {"price": 9.00, "link": "https://drive.google.com/drive/folders/1x1JQV47hebrLQe_GF4eq32oQgMt2E5CA?usp=drive_link"},
     "AUTOCAD 2026": {"price": 10.00, "link": "https://drive.google.com/file/d/1ajnOUzxLDfSOeXTJHCLJ1DiGjYDeW6o8/view?usp=drive_link"},
@@ -23,112 +31,200 @@ PRODUCTS_DATA = {
     "LIGHTROOM CLASSIC 2025": {"price": 10.00, "link": "https://drive.google.com/file/d/19imV-3YRbViFw-EMHh4ivS9ok2Sqv0un/view?usp=sharing"}
 }
 
-# --- FUNÇÕES DE COMUNICAÇÃO ---
+# --- FUNÇÕES DE APOIO ---
 
-def enviar_mensagem_telegram(chat_id, texto, reply_markup=None):
+def get_product_data(product_name):
+    """Busca os dados de um produto na lista fixa pelo nome."""
+    return PRODUCTS_DATA.get(product_name.upper())
+
+def enviar_mensagem_telegram(chat_id, texto, reply_markup=None): 
+    """Envia uma mensagem (pode ser com Reply Keyboard ou Inline Keyboard)."""
+    if not TELEGRAM_BOT_TOKEN:
+        print("Erro: TELEGRAM_BOT_TOKEN ausente.")
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": texto, "parse_mode": "HTML", "reply_markup": reply_markup}
-    return requests.post(url, json=payload)
+    payload = {
+        "chat_id": chat_id,
+        "text": texto,
+        "parse_mode": "HTML",
+    }
+    
+    if reply_markup:
+         payload["reply_markup"] = reply_markup
+         
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        
+    except requests.exceptions.RequestException as e:
+        print(f"ERRO CRÍTICO: Falha ao enviar mensagem para o Telegram. Erro: {e}")
 
-def editar_mensagem_telegram(chat_id, message_id, texto, reply_markup=None):
+def enviar_link_mp(chat_id, produto_nome, message_id):
+    """
+    Gera o link de pagamento do Mercado Pago e EDITA a mensagem do Telegram 
+    para mostrar o link e remover os botões.
+    """
+    produto_data = PRODUCTS_DATA.get(produto_nome.upper())
+
+    if not produto_data:
+        print(f"ERRO: Produto {produto_nome} não encontrado para gerar link.")
+        mensagem_resposta = "❌ Produto não encontrado. Use /produtos para tentar novamente."
+    else:
+        link_pagamento = criar_preferencia_mp(
+            produto_nome=produto_nome,
+            preco=produto_data['price'],
+            chat_id=chat_id
+        )
+
+        if link_pagamento:
+            mensagem_resposta = (
+                f"✅ Link Gerado: <b>{produto_nome}</b> (R$ {produto_data['price']:.2f})\n\n"
+                f"Acesse o link abaixo para finalizar a compra via Mercado Pago:\n"
+                f"<a href=\"{link_pagamento}\">{link_pagamento}</a>"
+            )
+        else:
+            mensagem_resposta = "❌ Desculpe, houve um erro ao gerar o link de pagamento. Tente novamente mais tarde."
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/editMessageText"
-    payload = {"chat_id": chat_id, "message_id": message_id, "text": texto, "parse_mode": "HTML", "reply_markup": reply_markup}
-    return requests.post(url, json=payload)
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": mensagem_resposta,
+        "parse_mode": "HTML",
+        "reply_markup": {"inline_keyboard": []} 
+    }
+    try:
+        requests.post(url, json=payload).raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"ERRO ao editar mensagem no Telegram: {e}")
 
 def criar_preferencia_mp(produto_nome, preco, chat_id):
-    if not MERCADO_PAGO_ACCESS_TOKEN: return None
+    if not MERCADO_PAGO_ACCESS_TOKEN:
+        return None
+
     url = "https://api.mercadopago.com/checkout/preferences"
-    headers = {"Authorization": f"Bearer {MERCADO_PAGO_ACCESS_TOKEN}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {MERCADO_PAGO_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    notification_url = f"{RENDER_BASE_URL}/notificacao"
+
     payload = {
         "items": [{"title": produto_nome, "quantity": 1, "unit_price": preco}],
         "metadata": {"telegram_user_id": str(chat_id), "produto": produto_nome},
-        "notification_url": f"{RENDER_BASE_URL}/notificacao",
+        "notification_url": notification_url,
         "back_urls": {"success": "https://t.me/NTGTECH_bot"},
         "auto_return": "approved"
     }
-    res = requests.post(url, headers=headers, json=payload)
-    return res.json().get("init_point") if res.status_code == 201 else None
 
-# --- WEBHOOK PRINCIPAL ---
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json().get("init_point") 
+    except requests.exceptions.RequestException as e:
+        print(f"ERRO no MP: {e}")
+        return None
+
+# ===============================================
+#          ROTAS DO FLASK (WEBHOOKS)
+# ===============================================
+
+@app.route('/')
+def home():
+    return 'Webhook ativo!'
 
 @app.route('/telegram_webhook', methods=['POST'])
 def telegram_webhook():
-    update = request.get_json()
+    try:
+        update = request.get_json()
 
-    # MENU INICIAL (START)
-    menu_principal = {
-        "inline_keyboard": [
-            [{"text": "🛍️ Ver Produtos", "callback_data": "MENU_PRODUTOS"}],
-            [{"text": "🛠️ Como Instalar (Tutoriais)", "callback_data": "MENU_INSTALAR"}]
-        ]
-    }
+        if 'callback_query' in update:
+            callback_query = update['callback_query']
+            callback_data = callback_query['data']
+            chat_id = callback_query['message']['chat']['id']
+            message_id = callback_query['message']['message_id']
 
-    # 1. PROCESSA CLIQUES NOS BOTÕES
-    if 'callback_query' in update:
-        query = update['callback_query']
-        chat_id = query['message']['chat']['id']
-        message_id = query['message']['message_id']
-        data = query['data']
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", 
+                          json={"callback_query_id": callback_query['id']})
+            
+            # Verificação de produtos
+            if callback_data.upper() in PRODUCTS_DATA:
+                enviar_link_mp(chat_id, callback_data.upper(), message_id)
+            
+            # Resposta para o botão de Instalação
+            elif callback_data == "COMO_INSTALAR":
+                mensagem_instalar = (
+                    "🛠️ <b>Como Instalar os Programas:</b>\n\n"
+                    "Assista aos vídeos tutoriais abaixo para realizar a instalação:\n\n"
+                    "• <a href='LINK_DO_SEU_VIDEO_AQUI'>Tutorial de Instalação Geral</a>\n"
+                )
+                enviar_mensagem_telegram(chat_id, mensagem_instalar)
 
-        # Responde o clique para tirar o reloginho do botão
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": query['id']})
+            return jsonify({'status': 'ok'}), 200
 
-        if data == "MENU_INSTALAR":
-            markup = {
-                "inline_keyboard": [
-                    [{"text": "📺 Tutorial Geral", "url": "https://youtube.com/LINK_AQUI"}],
-                    [{"text": "🔙 Voltar ao Início", "callback_data": "VOLTAR"}]
-                ]
-            }
-            texto = "<b>🛠️ Central de Ajuda</b>\n\nClique no botão abaixo para assistir ao vídeo de como instalar os programas corretamente:"
-            editar_mensagem_telegram(chat_id, message_id, texto, markup)
+        if 'message' in update:
+            message = update['message']
+            chat_id = message['chat']['id']
+            texto_recebido = message.get('text', '').strip().upper()
+            
+            hide_keyboard = {"remove_keyboard": True}
 
-        elif data == "MENU_PRODUTOS":
-            buttons = [[{"text": f"🛒 {n} (R$ {d['price']:.2f})", "callback_data": f"BUY_{n}"}] for n, d in PRODUCTS_DATA.items()]
-            buttons.append([{"text": "🔙 Voltar", "callback_data": "VOLTAR"}])
-            editar_mensagem_telegram(chat_id, message_id, "🛍️ <b>Selecione um produto:</b>", {"inline_keyboard": buttons})
+            if texto_recebido == "/START":
+                # Adicionando o botão de Como Instalar no menu inicial
+                inline_markup = {
+                    "inline_keyboard": [
+                        [{"text": "🛍️ Ver Produtos", "text": "🛍️ Ver Produtos", "callback_data": "VER_PRODUTOS_CMD"}],
+                        [{"text": "🛠️ Como Instalar", "callback_data": "COMO_INSTALAR"}]
+                    ]
+                }
+                mensagem_resposta = "👋 Olá! Seja bem-vindo à NTG Tech. Use os botões abaixo para navegar:"
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=inline_markup)
+                return jsonify({'status': 'ok'}), 200
 
-        elif data == "VOLTAR":
-            editar_mensagem_telegram(chat_id, message_id, "👋 Olá! Seja bem-vindo à NTG Tech. O que deseja fazer?", menu_principal)
-
-        elif data.startswith("BUY_"):
-            prod_name = data.replace("BUY_", "")
-            link = criar_preferencia_mp(prod_name, PRODUCTS_DATA[prod_name]['price'], chat_id)
-            if link:
-                msg = f"✅ Link Gerado: <b>{prod_name}</b>\n\n<a href='{link}'>Clique aqui para pagar</a>"
-                editar_mensagem_telegram(chat_id, message_id, msg, {"inline_keyboard": [[{"text": "🔙 Voltar", "callback_data": "MENU_PRODUTOS"}]]})
+            elif texto_recebido == "/PRODUTOS" or texto_recebido == "VER_PRODUTOS_CMD":
+                inline_buttons = []
+                for name, data in PRODUCTS_DATA.items():
+                    inline_buttons.append([{"text": f"🛒 {name} (R$ {data['price']:.2f})", "callback_data": name}])
+                
+                inline_markup = {"inline_keyboard": inline_buttons}
+                mensagem_resposta = "🛍️ <b>Clique no produto para comprar:</b>"
+                enviar_mensagem_telegram(chat_id, mensagem_resposta, reply_markup=inline_markup)
+                return jsonify({'status': 'ok'}), 200
+                
+            else:
+                enviar_mensagem_telegram(chat_id, "Use /start ou /produtos.", reply_markup=hide_keyboard)
+                return jsonify({'status': 'ok'}), 200
 
         return jsonify({'status': 'ok'}), 200
+    except Exception as e:
+        print(f"ERRO: {e}")
+        return jsonify({'status': 'error'}), 200
 
-    # 2. PROCESSA MENSAGENS DIGITADAS
-    if 'message' in update:
-        msg = update['message']
-        chat_id = msg['chat']['id']
-        text = msg.get('text', '').upper()
-
-        if text == "/START" or text == "/PRODUTOS":
-            enviar_mensagem_telegram(chat_id, "👋 Olá! Seja bem-vindo à NTG Tech. Escolha uma opção:", menu_principal)
-
-    return jsonify({'status': 'ok'}), 200
-
-# --- ROTA DE NOTIFICAÇÃO (MANTIDA) ---
 @app.route('/notificacao', methods=['POST'])
 def notificacao():
-    dados = request.json
-    if dados and dados.get("type") == "payment":
-        p_id = dados.get("data", {}).get("id")
-        res = requests.get(f"https://api.mercadopago.com/v1/payments/{p_id}", headers={"Authorization": f"Bearer {MERCADO_PAGO_ACCESS_TOKEN}"})
-        pay = res.json()
-        if pay.get("status") == "approved":
-            u_id = pay.get("metadata", {}).get("telegram_user_id")
-            p_nome = pay.get("metadata", {}).get("produto")
-            link = PRODUCTS_DATA.get(p_nome, {}).get("link")
-            if link:
-                enviar_mensagem_telegram(u_id, f"🎉 Pagamento aprovado!\n\n<b>Produto:</b> {p_nome}\n<b>Link:</b> {link}")
-    return "OK", 200
-
-@app.route('/')
-def home(): return "Bot Online"
+    # ... (sua lógica de notificação permanece idêntica)
+    try:
+        dados = request.json
+        if dados and dados.get("type") == "payment":
+            payment_id = dados.get("data", {}).get("id")
+            headers_mp = {"Authorization": f"Bearer {MERCADO_PAGO_ACCESS_TOKEN}"}
+            response_mp = requests.get(f"https://api.mercadopago.com/v1/payments/{payment_id}", headers=headers_mp)
+            payment_details = response_mp.json()
+            
+            if payment_details.get("status") == "approved":
+                telegram_user_id = payment_details.get("metadata", {}).get("telegram_user_id")
+                produto_nome = payment_details.get("metadata", {}).get("produto")
+                product_data = get_product_data(produto_nome)
+                
+                if product_data:
+                    link = product_data["link"]
+                    mensagem = f"🎉 Pagamento confirmado!\n<b>Produto:</b> {produto_nome}\n<b>Acesse aqui:</b> {link}"
+                    enviar_mensagem_telegram(telegram_user_id, mensagem) 
+        return "OK", 200
+    except:
+        return 'Error', 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
