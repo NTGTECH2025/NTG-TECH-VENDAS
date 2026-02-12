@@ -43,10 +43,11 @@ INSTALL_VIDEOS = {
 
 MAIN_MENU = {
     "keyboard": [
-        ["🛒 Produtos", "📦 Instalar"],
-        ["▶️ Start"]
+        [{"text": "🛒 Produtos"}, {"text": "📦 Instalar"}],
+        [{"text": "▶️ Start"}]
     ],
-    "resize_keyboard": True
+    "resize_keyboard": True,
+    "one_time_keyboard": False
 }
 
 # =============================
@@ -56,14 +57,15 @@ MAIN_MENU = {
 def enviar_mensagem(chat_id, texto, markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
+    if markup is None:
+        markup = MAIN_MENU
+
     payload = {
         "chat_id": chat_id,
         "text": texto,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "reply_markup": markup
     }
-
-    if markup:
-        payload["reply_markup"] = markup
 
     requests.post(url, json=payload)
 
@@ -166,8 +168,7 @@ def telegram_webhook():
         if texto in ["/START", "▶️ START"]:
             enviar_mensagem(
                 chat_id,
-                "👋 <b>Bem-vindo!</b>\nEscolha uma opção abaixo:",
-                MAIN_MENU
+                "👋 <b>Bem-vindo!</b>\nEscolha uma opção abaixo:"
             )
 
         # PRODUTOS
@@ -204,8 +205,7 @@ def telegram_webhook():
         else:
             enviar_mensagem(
                 chat_id,
-                "❌ Comando inválido. Use os botões abaixo.",
-                MAIN_MENU
+                "❌ Comando inválido. Use os botões abaixo."
             )
 
     return jsonify(ok=True)
@@ -246,8 +246,7 @@ def notificacao():
             chat_id,
             f"🎉 Pagamento confirmado!\n\n"
             f"{produto}\n"
-            f"<a href=\"{link}\">Baixar aqui</a>",
-            MAIN_MENU
+            f"<a href=\"{link}\">Baixar aqui</a>"
         )
 
     return "OK"
