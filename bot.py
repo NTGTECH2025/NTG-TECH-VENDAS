@@ -28,26 +28,19 @@ PRODUCTS_DATA = {
 }
 
 # =============================
-# VÍDEOS
+# VÍDEOS DE INSTALAÇÃO
 # =============================
 
 INSTALL_VIDEOS = {
-    "INSTALAR_PS": {
-        "nome": "PHOTOSHOP 2025",
-        "link": "https://www.youtube.com/watch?v=apkQG3PTt-0"
-    },
-    "INSTALAR_AI": {
-        "nome": "ILLUSTRATOR 2025",
-        "link": "https://link-do-youtube"
-    },
-    "INSTALAR_PREMIERE": {
-        "nome": "PREMIERE 2025",
-        "link": "https://link-do-youtube"
-    },
-    "INSTALAR_AE": {
-        "nome": "AFTER EFFECTS 2025",
-        "link": "https://link-do-youtube"
-    }
+    "AI2025": {"nome": "ILLUSTRATOR 2025", "link": "https://www.youtube.com/watch?v=hlzqnIctsN0"},
+    "PS2025": {"nome": "PHOTOSHOP 2025", "link": "https://www.youtube.com/watch?v=apkQG3PTt-0"},
+    "AE2025": {"nome": "AFTER EFFECTS 2025", "link": "https://www.youtube.com/watch?v=fPQ3eymc8hI"},
+    "LR2025": {"nome": "LIGHTROOM CLASSIC 2025", "link": "https://www.youtube.com/watch?v=3vLEQQW4jrM"},
+    "PR2025": {"nome": "PREMIERE 2025", "link": "https://www.youtube.com/watch?v=qfur2u-sIxo"},
+    "ID2025": {"nome": "INDESIGN 2025", "link": "https://www.youtube.com/watch?v=wdsobSMbsJE"},
+    "ACROBAT": {"nome": "ACROBAT DC 2025", "link": "https://www.youtube.com/watch?v=a5h17q1HRHM"},
+    "OFFICE": {"nome": "MICROSOFT OFFICE 2025", "link": "https://www.youtube.com/watch?v=-dAdB0wVpwo"},
+    "SKETCH": {"nome": "SKETCHUP 2025", "link": "https://www.youtube.com/watch?v=UvctNlTXFB8"},
 }
 
 # =============================
@@ -57,8 +50,8 @@ INSTALL_VIDEOS = {
 def menu_principal():
     return {
         "inline_keyboard": [
-            [{"text": "🛒 Produtos", "callback_data": "MENU_PRODUTOS"}],
-            [{"text": "📦 Instalar", "callback_data": "MENU_INSTALAR"}]
+            [{"text": "🛒 COMPRAR PRODUTOS", "callback_data": "MENU_PRODUTOS"}],
+            [{"text": "📦 TUTORIAL INSTALAÇÃO", "callback_data": "MENU_INSTALAR"}]
         ]
     }
 
@@ -128,6 +121,7 @@ def telegram_webhook():
             json={"callback_query_id": q["id"]}
         )
 
+        # MENU PRODUTOS
         if data == "MENU_PRODUTOS":
             botoes = []
 
@@ -136,12 +130,13 @@ def telegram_webhook():
                     {"text": f"🛒 {nome} (R$ {d['price']:.2f})", "callback_data": nome}
                 ])
 
-            botoes.append([{"text": "⬅️ Voltar", "callback_data": "MENU"}])
+            botoes.append([{"text": "⬅️ VOLTAR", "callback_data": "MENU"}])
 
             enviar(chat_id, "🛍️ <b>Escolha o produto:</b>", {
                 "inline_keyboard": botoes
             })
 
+        # MENU INSTALAÇÃO
         elif data == "MENU_INSTALAR":
             botoes = []
 
@@ -150,7 +145,7 @@ def telegram_webhook():
                     {"text": f"📦 {v['nome']}", "callback_data": chave}
                 ])
 
-            botoes.append([{"text": "⬅️ Voltar", "callback_data": "MENU"}])
+            botoes.append([{"text": "⬅️ VOLTAR", "callback_data": "MENU"}])
 
             enviar(chat_id, "📦 <b>Escolha o tutorial:</b>", {
                 "inline_keyboard": botoes
@@ -159,21 +154,25 @@ def telegram_webhook():
         elif data == "MENU":
             enviar(chat_id, "🏠 <b>Menu principal:</b>", menu_principal())
 
+        # COMPRA (SÓ BOTÃO VOLTAR)
         elif data in PRODUCTS_DATA:
             p = PRODUCTS_DATA[data]
             link = criar_preferencia(data, p["price"], chat_id)
 
             enviar(
                 chat_id,
-                f"✅ <b>{data}</b>\n<a href=\"{link}\">Clique aqui para pagar</a>"
+                f"✅ <b>{data}</b>\n<a href=\"{link}\">Clique aqui para pagar</a>",
+                {"inline_keyboard": [[{"text": "⬅️ VOLTAR", "callback_data": "MENU"}]]}
             )
 
+        # TUTORIAL
         elif data in INSTALL_VIDEOS:
             v = INSTALL_VIDEOS[data]
 
             enviar(
                 chat_id,
-                f"📦 <b>{v['nome']}</b>\n<a href=\"{v['link']}\">Assistir tutorial</a>"
+                f"📦 <b>{v['nome']}</b>\n<a href=\"{v['link']}\">Assistir tutorial</a>",
+                {"inline_keyboard": [[{"text": "⬅️ VOLTAR", "callback_data": "MENU"}]]}
             )
 
         return jsonify(ok=True)
